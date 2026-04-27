@@ -1,0 +1,9 @@
+[repository]
+name = "hyprfence"
+authors = ["steinklo"]
+commit_pins = []
+
+[hyprfence]
+description = "Confines the cursor to the active monitor"
+output = "hyprfence.so"
+build = ["cmake -B build", "cmake --build build"]
