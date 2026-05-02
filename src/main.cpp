@@ -16,16 +16,7 @@ static bool             g_enabled   = true;
 using origMoveT = void (*)(void*, const Vector2D&);
 
 static bool isEnabled() {
-    if (!PHANDLE || !g_enabled)
-        return false;
-    auto* val = HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprfence:enabled");
-    if (!val)
-        return false;
-    try {
-        return std::any_cast<Hyprlang::INT>(val->getValue()) != 0;
-    } catch (...) {
-        return false;
-    }
+    return PHANDLE && g_enabled;
 }
 
 // RAII guard to prevent re-entrancy when warping
@@ -73,6 +64,14 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:hyprfence:enabled", Hyprlang::INT{1});
 
+    HyprlandAPI::reloadConfig();
+    auto* val = HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprfence:enabled");
+    if (val) {
+        try {
+            g_enabled = std::any_cast<Hyprlang::INT>(val->getValue()) != 0;
+        } catch (...) {}
+    }
+
     // Hook CPointerManager::move to confine cursor to current monitor
     auto fns = HyprlandAPI::findFunctionsByName(PHANDLE, "move");
     for (auto& fn : fns) {
@@ -102,8 +101,6 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
             g_enabled ? CHyprColor{0.2, 1.0, 0.2, 1.0} : CHyprColor{1.0, 0.6, 0.2, 1.0}, 2000);
         return {};
     });
-
-    HyprlandAPI::reloadConfig();
 
     return {"hyprfence", "Confines cursor to the active monitor", "steinklo", "0.1"};
 }
