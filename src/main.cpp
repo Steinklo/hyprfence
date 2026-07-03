@@ -1,6 +1,7 @@
 #include <hyprland/src/version.h>
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
+#include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/helpers/Monitor.hpp>
 #include <hyprland/src/managers/PointerManager.hpp>
 #include <hyprland/src/plugins/HookSystem.hpp>
@@ -17,6 +18,23 @@ using origMoveT = void (*)(void*, const Vector2D&);
 
 static bool isEnabled() {
     return PHANDLE && g_enabled;
+}
+
+// Re-reads plugin:hyprfence:enabled from the live config. Hooked to the
+// config.reloaded event (see PLUGIN_INIT) rather than read once at startup:
+// HyprlandAPI::reloadConfig() only queues a reload (see PluginAPI.hpp), so a
+// synchronous read immediately after it still sees the pre-reload default —
+// which is why the fence used to always start enabled regardless of the
+// config file. Hooking the event also keeps g_enabled in sync with later
+// reloads (e.g. `hyprctl reload` after a nix-rebuild), which a one-shot read
+// at init could never do since PLUGIN_INIT doesn't run again.
+static void syncEnabledFromConfig() {
+    auto* val = HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprfence:enabled");
+    if (!val)
+        return;
+    try {
+        g_enabled = std::any_cast<Hyprlang::INT>(val->getValue()) != 0;
+    } catch (...) {}
 }
 
 // RAII guard to prevent re-entrancy when warping
@@ -64,13 +82,14 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:hyprfence:enabled", Hyprlang::INT{1});
 
+    // Listener is static (lives for the process), so no need to hold the
+    // CHyprSignalListener this would otherwise return.
+    Event::bus()->m_events.config.reloaded.listenStatic(&syncEnabledFromConfig);
+
+    // The plugin's config key wasn't registered yet during Hyprland's first
+    // parse of the config file, so queue a reload now to pick it up; the
+    // listener above applies the result once it actually runs.
     HyprlandAPI::reloadConfig();
-    auto* val = HyprlandAPI::getConfigValue(PHANDLE, "plugin:hyprfence:enabled");
-    if (val) {
-        try {
-            g_enabled = std::any_cast<Hyprlang::INT>(val->getValue()) != 0;
-        } catch (...) {}
-    }
 
     // Hook CPointerManager::move to confine cursor to current monitor
     auto fns = HyprlandAPI::findFunctionsByName(PHANDLE, "move");
